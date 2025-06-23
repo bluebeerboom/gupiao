@@ -4,16 +4,12 @@
       <h2>📈 高涨幅创新高股票</h2>
       <div class="stats" v-if="stats">
         <span class="stat-item">
-          <span class="label">总股票数:</span>
+          <span class="label">总数量:</span>
           <span class="value">{{ stats.total }}</span>
         </span>
         <span class="stat-item">
-          <span class="label">3年新高:</span>
-          <span class="value highlight">{{ stats.threeYearHighs }}</span>
-        </span>
-        <span class="stat-item">
-          <span class="label">历史新高:</span>
-          <span class="value highlight">{{ stats.allTimeHighs }}</span>
+          <span class="label">接近新高:</span>
+          <span class="value highlight">{{ stats.nearHighs }}</span>
         </span>
       </div>
     </div>
@@ -33,11 +29,11 @@
       <div class="filters">
         <label>
           <input type="checkbox" v-model="showThreeYearHighs" />
-          只显示3年新高
+          只显示接近新高
         </label>
         <label>
           <input type="checkbox" v-model="showAllTimeHighs" />
-          只显示历史新高
+          只显示非常接近新高
         </label>
       </div>
 
@@ -48,37 +44,38 @@
           :key="stock.ts_code"
           class="stock-item"
           :class="{ 
-            'three-year-high': stock.is_3y_high,
-            'all-time-high': stock.is_all_time_high 
+            'near-high': (stock.close || 0) >= (stock.recent_high || 0) * 0.95,
+            'very-near-high': (stock.close || 0) >= (stock.recent_high || 0) * 0.98 
           }"
         >
           <div class="stock-header">
             <div class="stock-info">
-              <h3>{{ stock.name }}</h3>
-              <span class="code">{{ stock.ts_code }}</span>
+              <h3>{{ stock.name || '未知' }}</h3>
+              <span class="code">{{ stock.ts_code || 'N/A' }}</span>
             </div>
             <div class="price-info">
-              <span class="current-price">¥{{ stock.current_price.toFixed(2) }}</span>
-              <span class="pct-change" :class="{ positive: stock.pct_chg > 0 }">
-                +{{ stock.pct_chg.toFixed(2) }}%
+              <span class="current-price">¥{{ (stock.close || 0).toFixed(2) }}</span>
+              <span class="pct-change" :class="{ positive: (stock.pct_chg || 0) > 0 }">
+                +{{ (stock.pct_chg || 0).toFixed(2) }}%
               </span>
             </div>
           </div>
           
           <div class="stock-details">
             <div class="detail-item">
-              <span class="label">3年最高:</span>
-              <span class="value">¥{{ stock.max_3y.toFixed(2) }}</span>
-              <span class="badge" :class="{ active: stock.is_3y_high }">
-                {{ stock.is_3y_high ? '✅ 3年新高' : '❌ 非3年新高' }}
+              <span class="label">近期最高:</span>
+              <span class="value">¥{{ (stock.recent_high || 0).toFixed(2) }}</span>
+              <span class="badge" :class="{ active: (stock.close || 0) >= (stock.recent_high || 0) * 0.95 }">
+                {{ (stock.close || 0) >= (stock.recent_high || 0) * 0.95 ? '✅ 接近新高' : '❌ 非新高' }}
               </span>
             </div>
-            <div class="detail-item" v-if="stock.max_all">
-              <span class="label">历史最高:</span>
-              <span class="value">¥{{ stock.max_all.toFixed(2) }}</span>
-              <span class="badge" :class="{ active: stock.is_all_time_high }">
-                {{ stock.is_all_time_high ? '🏆 历史新高' : '📊 非历史新高' }}
-              </span>
+            <div class="detail-item">
+              <span class="label">地区:</span>
+              <span class="value">{{ stock.area || '未知' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">行业:</span>
+              <span class="value">{{ stock.industry || '未知' }}</span>
             </div>
           </div>
         </div>
@@ -108,13 +105,11 @@ export default {
     const stats = computed(() => {
       if (stocks.value.length === 0) return null
       
-      const threeYearHighs = stocks.value.filter(s => s.is_3y_high).length
-      const allTimeHighs = stocks.value.filter(s => s.is_all_time_high).length
+      const nearHighs = stocks.value.filter(s => (s.close || 0) >= (s.recent_high || 0) * 0.95).length
       
       return {
         total: stocks.value.length,
-        threeYearHighs,
-        allTimeHighs
+        nearHighs
       }
     })
 
@@ -122,14 +117,14 @@ export default {
       let filtered = stocks.value
       
       if (showThreeYearHighs.value) {
-        filtered = filtered.filter(s => s.is_3y_high)
+        filtered = filtered.filter(s => (s.close || 0) >= (s.recent_high || 0) * 0.95)
       }
       
       if (showAllTimeHighs.value) {
-        filtered = filtered.filter(s => s.is_all_time_high)
+        filtered = filtered.filter(s => (s.close || 0) >= (s.recent_high || 0) * 0.98)
       }
       
-      return filtered.sort((a, b) => b.pct_chg - a.pct_chg)
+      return filtered.sort((a, b) => (b.pct_chg || 0) - (a.pct_chg || 0))
     })
 
     const loadData = async () => {

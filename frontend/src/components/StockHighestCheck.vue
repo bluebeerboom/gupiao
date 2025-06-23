@@ -48,22 +48,37 @@
         <div class="price-comparison">
           <div class="price-item">
             <span class="label">今日收盘价</span>
-            <span class="value current">¥{{ stockData.today_close.toFixed(2) }}</span>
+            <span class="value current">¥{{ (stockData.today_close || 0).toFixed(2) }}</span>
           </div>
           <div class="price-item">
             <span class="label">3年最高价</span>
-            <span class="value max">¥{{ stockData.max_close.toFixed(2) }}</span>
+            <span class="value max">¥{{ (stockData.max_close || 0).toFixed(2) }}</span>
+          </div>
+          <div class="price-item">
+            <span class="label">3年最低价</span>
+            <span class="value min">¥{{ (stockData.min_close || 0).toFixed(2) }}</span>
           </div>
           <div class="price-diff">
-            <span class="label">价差</span>
+            <span class="label">距最高价</span>
             <span class="value" :class="{ 'positive': priceDiff > 0, 'negative': priceDiff < 0 }">
               {{ priceDiff > 0 ? '+' : '' }}¥{{ priceDiff.toFixed(2) }}
             </span>
           </div>
         </div>
 
-        <div class="trade-date">
-          交易日期: {{ formatDate(stockData.trade_date) }}
+        <div class="data-info">
+          <div class="info-item">
+            <span class="label">数据期间:</span>
+            <span class="value">{{ stockData.data_period }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">交易日数:</span>
+            <span class="value">{{ stockData.total_days }} 天</span>
+          </div>
+          <div class="info-item">
+            <span class="label">交易日期:</span>
+            <span class="value">{{ formatDate(stockData.trade_date) }}</span>
+          </div>
         </div>
       </div>
 
@@ -81,9 +96,10 @@
       <h3>使用说明</h3>
       <ul>
         <li>输入完整的股票代码，如：000001.SZ（平安银行）</li>
-        <li>支持A股、港股、美股代码格式</li>
+        <li>暂只支持A股代码格式（.SZ、.SH、.BJ）</li>
         <li>系统将检查该股票今日收盘价是否为近3年最高价</li>
-        <li>同时显示历史价格走势图表</li>
+        <li>显示近3年的股价走势图，标注最高点和最低点</li>
+        <li>提供详细的价格统计和数据分析</li>
       </ul>
       
       <div class="examples">
@@ -92,7 +108,7 @@
           <span class="example">000001.SZ</span>
           <span class="example">000002.SZ</span>
           <span class="example">600000.SH</span>
-          <span class="example">01810.HK</span>
+          <span class="example">300750.SZ</span>
         </div>
       </div>
     </div>
@@ -100,7 +116,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { checkIsHighestToday } from '../api'
 
 export default {
@@ -114,7 +130,7 @@ export default {
 
     const priceDiff = computed(() => {
       if (!stockData.value) return 0
-      return stockData.value.today_close - stockData.value.max_close
+      return (stockData.value.today_close || 0) - (stockData.value.max_close || 0)
     })
 
     const checkStock = async () => {
@@ -124,17 +140,30 @@ export default {
       }
       
       loading.value = true
+      error.value = null
       try {
         const result = await checkIsHighestToday(stockCode.value)
         stockData.value = result
         console.log('股票检查结果:', result)
-      } catch (error) {
-        console.error('检查失败:', error)
-        alert('检查失败: ' + (error.response?.data?.detail || error.message))
+      } catch (err) {
+        console.error('检查失败:', err)
+        error.value = err.response?.data?.detail || err.message || '检查失败'
       } finally {
         loading.value = false
       }
     }
+
+    // 监听stockData变化，当数据更新时绘制图表
+    watch(stockData, async (newData) => {
+      if (newData && newData.history && newData.history.length > 0) {
+        // 等待DOM更新完成
+        await nextTick()
+        // 再次等待确保Canvas元素已渲染
+        setTimeout(() => {
+          drawChart(newData.history)
+        }, 100)
+      }
+    }, { deep: true })
 
     const formatDate = (dateStr) => {
       if (!dateStr) return ''
@@ -142,15 +171,29 @@ export default {
     }
 
     const drawChart = (historyData) => {
-      if (!chartCanvas.value) return
+      console.log('开始绘制图表，历史数据:', historyData)
+      
+      if (!chartCanvas.value) {
+        console.error('Canvas元素不存在')
+        return
+      }
 
       const canvas = chartCanvas.value
       const ctx = canvas.getContext('2d')
       
+      console.log('Canvas尺寸:', canvas.width, 'x', canvas.height)
+      
       // 清空画布
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      if (historyData.length === 0) return
+      if (historyData.length === 0) {
+        console.error('历史数据为空')
+        return
+      }
+
+      console.log('历史数据长度:', historyData.length)
+      console.log('第一条数据:', historyData[0])
+      console.log('最后一条数据:', historyData[historyData.length - 1])
 
       // 准备数据
       const prices = historyData.map(item => item.close)
@@ -159,11 +202,19 @@ export default {
       const maxPrice = Math.max(...prices)
       const priceRange = maxPrice - minPrice
 
-      // 设置图表参数
-      const padding = 60
+      console.log('价格范围:', minPrice, '到', maxPrice, '范围:', priceRange)
+
+      // 找到最高点和最低点的索引
+      const maxIndex = prices.indexOf(maxPrice)
+      const minIndex = prices.indexOf(minPrice)
+
+      // 设置图表参数 - 增加边距避免文字遮挡
+      const padding = 100
       const chartWidth = canvas.width - 2 * padding
       const chartHeight = canvas.height - 2 * padding
       const pointSpacing = chartWidth / (prices.length - 1)
+
+      console.log('图表参数:', { padding, chartWidth, chartHeight, pointSpacing })
 
       // 绘制坐标轴
       ctx.strokeStyle = '#ddd'
@@ -205,9 +256,49 @@ export default {
         const y = canvas.height - padding - ((price - minPrice) / priceRange) * chartHeight
         
         ctx.beginPath()
-        ctx.arc(x, y, 3, 0, 2 * Math.PI)
+        ctx.arc(x, y, 1.5, 0, 2 * Math.PI)
         ctx.fill()
       })
+
+      // 标注最高点
+      const maxX = padding + maxIndex * pointSpacing
+      const maxY = canvas.height - padding - ((maxPrice - minPrice) / priceRange) * chartHeight
+      
+      ctx.fillStyle = '#e74c3c'
+      ctx.beginPath()
+      ctx.arc(maxX, maxY, 6, 0, 2 * Math.PI)
+      ctx.fill()
+      
+      // 添加最高点标签 - 调整位置避免遮挡
+      ctx.fillStyle = '#e74c3c'
+      ctx.font = 'bold 11px Arial'
+      ctx.textAlign = 'center'
+      // 根据位置调整标签位置
+      if (maxY < padding + 30) {
+        ctx.fillText(`最高: ¥${maxPrice.toFixed(2)}`, maxX, maxY + 20)
+      } else {
+        ctx.fillText(`最高: ¥${maxPrice.toFixed(2)}`, maxX, maxY - 10)
+      }
+
+      // 标注最低点
+      const minX = padding + minIndex * pointSpacing
+      const minY = canvas.height - padding - ((minPrice - minPrice) / priceRange) * chartHeight
+      
+      ctx.fillStyle = '#27ae60'
+      ctx.beginPath()
+      ctx.arc(minX, minY, 6, 0, 2 * Math.PI)
+      ctx.fill()
+      
+      // 添加最低点标签 - 调整位置避免遮挡
+      ctx.fillStyle = '#27ae60'
+      ctx.font = 'bold 11px Arial'
+      ctx.textAlign = 'center'
+      // 根据位置调整标签位置
+      if (minY > canvas.height - padding - 30) {
+        ctx.fillText(`最低: ¥${minPrice.toFixed(2)}`, minX, minY - 15)
+      } else {
+        ctx.fillText(`最低: ¥${minPrice.toFixed(2)}`, minX, minY + 20)
+      }
 
       // 标注今日价格点
       if (stockData.value) {
@@ -218,33 +309,69 @@ export default {
         
         ctx.fillStyle = stockData.value.is_highest ? '#e74c3c' : '#f39c12'
         ctx.beginPath()
-        ctx.arc(x, y, 6, 0, 2 * Math.PI)
+        ctx.arc(x, y, 8, 0, 2 * Math.PI)
         ctx.fill()
         
-        // 添加标签
+        // 添加今日价格标签 - 调整位置避免遮挡
         ctx.fillStyle = '#2c3e50'
-        ctx.font = '12px Arial'
+        ctx.font = 'bold 11px Arial'
         ctx.textAlign = 'center'
-        ctx.fillText(`今日: ¥${todayPrice.toFixed(2)}`, x, y - 10)
+        // 根据位置调整标签位置
+        if (y < padding + 40) {
+          ctx.fillText(`今日: ¥${(todayPrice || 0).toFixed(2)}`, x, y + 25)
+        } else {
+          ctx.fillText(`今日: ¥${(todayPrice || 0).toFixed(2)}`, x, y - 15)
+        }
       }
 
       // 绘制Y轴标签
       ctx.fillStyle = '#666'
-      ctx.font = '12px Arial'
+      ctx.font = '10px Arial'
       ctx.textAlign = 'right'
       for (let i = 0; i <= 5; i++) {
         const price = minPrice + (priceRange * i / 5)
         const y = canvas.height - padding - (chartHeight * i / 5)
-        ctx.fillText(`¥${price.toFixed(2)}`, padding - 10, y + 4)
+        ctx.fillText(`¥${(price || 0).toFixed(2)}`, padding - 10, y + 3)
       }
 
       // 绘制X轴标签（简化，只显示部分日期）
       ctx.textAlign = 'center'
-      const step = Math.max(1, Math.floor(dates.length / 8))
+      ctx.font = '10px Arial'
+      const step = Math.max(1, Math.floor(dates.length / 6))
       for (let i = 0; i < dates.length; i += step) {
         const x = padding + i * pointSpacing
-        ctx.fillText(dates[i].slice(5), x, canvas.height - padding + 20)
+        ctx.fillText(dates[i].slice(5), x, canvas.height - padding + 15)
       }
+
+      // 绘制图例 - 调整位置到图表上方
+      const legendY = padding - 30
+      const legendSpacing = 100
+      
+      // 今日价格图例
+      ctx.fillStyle = stockData.value?.is_highest ? '#e74c3c' : '#f39c12'
+      ctx.beginPath()
+      ctx.arc(padding, legendY, 4, 0, 2 * Math.PI)
+      ctx.fill()
+      ctx.fillStyle = '#2c3e50'
+      ctx.font = '11px Arial'
+      ctx.textAlign = 'left'
+      ctx.fillText('今日价格', padding + 8, legendY + 3)
+      
+      // 最高点图例
+      ctx.fillStyle = '#e74c3c'
+      ctx.beginPath()
+      ctx.arc(padding + legendSpacing, legendY, 4, 0, 2 * Math.PI)
+      ctx.fill()
+      ctx.fillStyle = '#2c3e50'
+      ctx.fillText('3年最高', padding + legendSpacing + 8, legendY + 3)
+      
+      // 最低点图例
+      ctx.fillStyle = '#27ae60'
+      ctx.beginPath()
+      ctx.arc(padding + legendSpacing * 2, legendY, 4, 0, 2 * Math.PI)
+      ctx.fill()
+      ctx.fillStyle = '#2c3e50'
+      ctx.fillText('3年最低', padding + legendSpacing * 2 + 8, legendY + 3)
     }
 
     return {
@@ -410,6 +537,10 @@ export default {
   color: #e74c3c;
 }
 
+.price-item .value.min {
+  color: #e74c3c;
+}
+
 .price-diff .value.positive {
   color: #27ae60;
 }
@@ -418,10 +549,32 @@ export default {
   color: #e74c3c;
 }
 
-.trade-date {
-  text-align: center;
-  color: #6c757d;
+.data-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.info-item .label {
   font-size: 14px;
+  color: #6c757d;
+  margin-bottom: 8px;
+}
+
+.info-item .value {
+  font-size: 20px;
+  font-weight: bold;
+  color: #2c3e50;
 }
 
 .chart-section {
@@ -429,23 +582,30 @@ export default {
   border-radius: 12px;
   padding: 25px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  margin-bottom: 30px;
 }
 
 .chart-section h3 {
-  margin: 0 0 20px 0;
   color: #2c3e50;
+  margin-bottom: 20px;
   text-align: center;
+  font-size: 18px;
 }
 
 .chart-container {
   display: flex;
   justify-content: center;
-  overflow-x: auto;
+  align-items: center;
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  border: 1px solid #e9ecef;
 }
 
 .chart-container canvas {
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .loading {

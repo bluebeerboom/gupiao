@@ -13,7 +13,7 @@ app = FastAPI(title="股票信息API", version="1.0.0")
 # 配置CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Vue开发服务器
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"],  # Vue开发服务器
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -342,7 +342,9 @@ async def check_is_highest_today(ts_code: str):
     try:
         # 统一股票代码格式
         ts_code = ts_code.upper()
-        if not ts_code.endswith('.SZ') and not ts_code.endswith('.SH'):
+        
+        # 标准化A股代码
+        if not ts_code.endswith('.SZ') and not ts_code.endswith('.SH') and not ts_code.endswith('.BJ'):
             if ts_code.startswith('00') or ts_code.startswith('30'):
                 ts_code = ts_code + '.SZ'
             elif ts_code.startswith('60'):
@@ -350,59 +352,89 @@ async def check_is_highest_today(ts_code: str):
             else:
                 ts_code = ts_code + '.SZ'  # 默认深圳
         
+        # 只支持A股
+        if not (ts_code.endswith('.SZ') or ts_code.endswith('.SH') or ts_code.endswith('.BJ')):
+            raise HTTPException(status_code=400, detail="暂只支持A股代码，请输入标准A股代码，如 000001.SZ、600000.SH")
+        
         print(f"检查股票 {ts_code} 是否为今日最高价")
         
-        latest_date = get_latest_trade_date()
-        if not latest_date:
-            raise HTTPException(status_code=500, detail="无法获取最新交易日数据")
-        
-        # 获取今日数据
-        today_data = pro.daily(ts_code=ts_code, trade_date=latest_date)
-        if today_data is None or today_data.empty:
-            raise HTTPException(status_code=404, detail="未找到该股票今日数据")
-        
-        today_info = today_data.iloc[0]
-        current_price = today_info['close']
-        today_high = today_info['high']
-        
-        # 获取最近30天的历史数据（简化查询范围）
-        start_date = '20240101'  # 简化：从2024年开始
-        hist_data = pro.daily(ts_code=ts_code, start_date=start_date, end_date=latest_date)
-        
-        if hist_data is None or hist_data.empty:
-            raise HTTPException(status_code=500, detail="无法获取历史数据")
-        
-        # 按日期排序
-        hist_data = hist_data.sort_values('trade_date')
-        
-        # 计算历史最高价
-        historical_high = hist_data['high'].max()
-        
+        # 计算日期范围
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=3 * 365)
+        end_date_str = end_date.strftime('%Y%m%d')
+        start_date_str = start_date.strftime('%Y%m%d')
+
+        # 获取A股数据
+        df = pro.daily(ts_code=ts_code, start_date=start_date_str, end_date=end_date_str)
+        market = 'A股'
+
+        if df is None or df.empty:
+            raise HTTPException(status_code=404, detail="未获取到股票历史数据！请检查代码、权限或Tushare接口权限。")
+
+        # 按交易日期排序（最新在前）
+        df = df.sort_values('trade_date', ascending=False)
+        today_close = df.iloc[0]['close']
+        max_close = df['close'].max()
+        min_close = df['close'].min()
+        today_date = df.iloc[0]['trade_date']
+
         # 获取股票基本信息
-        stock_info = pro.stock_basic(ts_code=ts_code)
-        stock_name = stock_info.iloc[0]['name'] if not stock_info.empty else "未知"
-        
+        stock_name = "未知"
+        try:
+            stock_info = pro.stock_basic(ts_code=ts_code)
+            if not stock_info.empty:
+                stock_name = stock_info.iloc[0]['name']
+        except:
+            pass
+
+        # 检查是否为3年最高价
+        is_highest = bool(today_close >= max_close)
+
+        # 准备历史数据用于绘图（按日期正序排列）
+        df_sorted = df.sort_values('trade_date')
+        history_data = []
+        for _, row in df_sorted.iterrows():
+            history_data.append({
+                "date": str(row['trade_date']),
+                "close": float(row['close']),
+                "high": float(row['high']),
+                "low": float(row['low']),
+                "pct_chg": float(row['pct_chg']) if 'pct_chg' in row else 0.0,
+                "vol": float(row['vol']) if 'vol' in row else 0.0
+            })
+
+        print(f"生成历史数据: {len(history_data)} 条记录")
+        if history_data:
+            print(f"第一条数据: {history_data[0]}")
+            print(f"最后一条数据: {history_data[-1]}")
+
         result = {
-            "ts_code": ts_code,
-            "name": stock_name,
-            "current_price": current_price,
-            "today_high": today_high,
-            "historical_high": historical_high,
-            "is_today_highest": current_price >= today_high,
-            "is_historical_highest": current_price >= historical_high,
-            "trade_date": latest_date,
-            "pct_chg": today_info['pct_chg'],
-            "vol": today_info['vol'],
-            "amount": today_info['amount']
+            "ts_code": str(ts_code),
+            "name": str(stock_name),
+            "market": str(market),
+            "today_close": float(today_close),
+            "max_close": float(max_close),
+            "min_close": float(min_close),
+            "is_highest": bool(is_highest),
+            "trade_date": str(today_date),
+            "pct_chg": float(df.iloc[0]['pct_chg']) if 'pct_chg' in df.iloc[0] else 0.0,
+            "vol": float(df.iloc[0]['vol']) if 'vol' in df.iloc[0] else 0.0,
+            "amount": float(df.iloc[0]['amount']) if 'amount' in df.iloc[0] else 0.0,
+            "history": history_data,
+            "data_period": str(f"{start_date_str} 至 {end_date_str}"),
+            "total_days": int(len(history_data))
         }
-        
-        print(f"检查完成: {ts_code} {stock_name}")
+
+        print(f"{ts_code}（{market}）在 {today_date} 的收盘价 {today_close} {'是' if is_highest else '不是'}近3年内最高价！")
         return result
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"检查股票 {ts_code} 出错: {str(e)}")
+        import traceback
+        print("详细错误信息:")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}")
 
 @app.get("/api/market-analysis")
