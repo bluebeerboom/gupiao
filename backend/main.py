@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import tushare as ts
@@ -7,13 +7,21 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 import json
 from config import TUSHARE_TOKEN
+from scheduler import (
+    save_market_stats,
+    save_high_rise_stocks,
+    save_rise_fall_distribution,
+    save_unified_market_analysis
+)
+from models import SessionLocal, MarketStats, HighRiseStock, RiseFallDistribution, UnifiedMarketAnalysis, StockHighestCheck
+from is_highest_today import is_today_highest
 
 app = FastAPI(title="股票信息API", version="1.0.0")
 
 # 配置CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"],  # Vue开发服务器
+    allow_origins=["http://localhost:4000", "http://localhost:5173", "http://127.0.0.1:4000", "http://127.0.0.1:5173"],  # Vue开发服务器
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -337,105 +345,12 @@ async def get_high_rise_stocks():
         raise HTTPException(status_code=500, detail=f"获取高涨幅股票失败: {str(e)}")
 
 @app.get("/api/is-highest-today/{ts_code}")
-async def check_is_highest_today(ts_code: str):
-    """检查指定股票是否为今日最高价"""
-    try:
-        # 统一股票代码格式
-        ts_code = ts_code.upper()
-        
-        # 标准化A股代码
-        if not ts_code.endswith('.SZ') and not ts_code.endswith('.SH') and not ts_code.endswith('.BJ'):
-            if ts_code.startswith('00') or ts_code.startswith('30'):
-                ts_code = ts_code + '.SZ'
-            elif ts_code.startswith('60'):
-                ts_code = ts_code + '.SH'
-            else:
-                ts_code = ts_code + '.SZ'  # 默认深圳
-        
-        # 只支持A股
-        if not (ts_code.endswith('.SZ') or ts_code.endswith('.SH') or ts_code.endswith('.BJ')):
-            raise HTTPException(status_code=400, detail="暂只支持A股代码，请输入标准A股代码，如 000001.SZ、600000.SH")
-        
-        print(f"检查股票 {ts_code} 是否为今日最高价")
-        
-        # 计算日期范围
-        end_date = datetime.today()
-        start_date = end_date - timedelta(days=3 * 365)
-        end_date_str = end_date.strftime('%Y%m%d')
-        start_date_str = start_date.strftime('%Y%m%d')
-
-        # 获取A股数据
-        df = pro.daily(ts_code=ts_code, start_date=start_date_str, end_date=end_date_str)
-        market = 'A股'
-
-        if df is None or df.empty:
-            raise HTTPException(status_code=404, detail="未获取到股票历史数据！请检查代码、权限或Tushare接口权限。")
-
-        # 按交易日期排序（最新在前）
-        df = df.sort_values('trade_date', ascending=False)
-        today_close = df.iloc[0]['close']
-        max_close = df['close'].max()
-        min_close = df['close'].min()
-        today_date = df.iloc[0]['trade_date']
-
-        # 获取股票基本信息
-        stock_name = "未知"
-        try:
-            stock_info = pro.stock_basic(ts_code=ts_code)
-            if not stock_info.empty:
-                stock_name = stock_info.iloc[0]['name']
-        except:
-            pass
-
-        # 检查是否为3年最高价
-        is_highest = bool(today_close >= max_close)
-
-        # 准备历史数据用于绘图（按日期正序排列）
-        df_sorted = df.sort_values('trade_date')
-        history_data = []
-        for _, row in df_sorted.iterrows():
-            history_data.append({
-                "date": str(row['trade_date']),
-                "close": float(row['close']),
-                "high": float(row['high']),
-                "low": float(row['low']),
-                "pct_chg": float(row['pct_chg']) if 'pct_chg' in row else 0.0,
-                "vol": float(row['vol']) if 'vol' in row else 0.0
-            })
-
-        print(f"生成历史数据: {len(history_data)} 条记录")
-        if history_data:
-            print(f"第一条数据: {history_data[0]}")
-            print(f"最后一条数据: {history_data[-1]}")
-
-        result = {
-            "ts_code": str(ts_code),
-            "name": str(stock_name),
-            "market": str(market),
-            "today_close": float(today_close),
-            "max_close": float(max_close),
-            "min_close": float(min_close),
-            "is_highest": bool(is_highest),
-            "trade_date": str(today_date),
-            "pct_chg": float(df.iloc[0]['pct_chg']) if 'pct_chg' in df.iloc[0] else 0.0,
-            "vol": float(df.iloc[0]['vol']) if 'vol' in df.iloc[0] else 0.0,
-            "amount": float(df.iloc[0]['amount']) if 'amount' in df.iloc[0] else 0.0,
-            "history": history_data,
-            "data_period": str(f"{start_date_str} 至 {end_date_str}"),
-            "total_days": int(len(history_data))
-        }
-
-        print(f"{ts_code}（{market}）在 {today_date} 的收盘价 {today_close} {'是' if is_highest else '不是'}近3年内最高价！")
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"检查股票 {ts_code} 出错: {str(e)}")
-        import traceback
-        print("详细错误信息:")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}")
+def check_is_highest_today(ts_code: str):
+    # 直接实时分析，不查数据库缓存
+    result = is_today_highest(ts_code)
+    if not result or not isinstance(result, dict):
+        return {"error": "分析失败或无数据"}
+    return result
 
 @app.get("/api/market-analysis")
 async def get_market_analysis():
@@ -783,6 +698,93 @@ def calculate_average_stats(stats_list):
         'avg_total': round(avg_total, 0),
         'avg_rise_ratio': round(avg_rise_ratio, 2)
     }
+
+@app.get("/api/market_stats")
+def get_market_stats():
+    session = SessionLocal()
+    stats = session.query(MarketStats).order_by(MarketStats.date.desc()).first()
+    session.close()
+    if stats:
+        return {
+            "date": stats.date,
+            "total": stats.total,
+            "rise": stats.rise,
+            "fall": stats.fall,
+            "flat": stats.flat,
+            "rise_ratio": stats.rise_ratio
+        }
+    else:
+        return {"error": "暂无数据"}
+
+@app.get("/api/high_rise_stocks")
+def get_high_rise_stocks():
+    session = SessionLocal()
+    latest = session.query(HighRiseStock.date).order_by(HighRiseStock.date.desc()).first()
+    if not latest:
+        session.close()
+        return {"stocks": [], "count": 0}
+    stocks = session.query(HighRiseStock).filter_by(date=latest[0]).all()
+    result = [dict(
+        ts_code=s.ts_code, name=s.name, current_price=s.current_price, pct_chg=s.pct_chg,
+        is_3y_high=bool(s.is_3y_high), is_all_time_high=bool(s.is_all_time_high),
+        max_3y=s.max_3y, max_all=s.max_all
+    ) for s in stocks]
+    session.close()
+    return {"stocks": result, "count": len(result), "trade_date": latest[0]}
+
+@app.get("/api/rise_fall_distribution")
+def get_rise_fall_distribution():
+    session = SessionLocal()
+    latest = session.query(RiseFallDistribution.date).order_by(RiseFallDistribution.date.desc()).first()
+    if not latest:
+        session.close()
+        return {"rise": [], "fall": [], "date": None}
+    rise = session.query(RiseFallDistribution).filter_by(date=latest[0], type='rise').all()
+    fall = session.query(RiseFallDistribution).filter_by(date=latest[0], type='fall').all()
+    rise_result = [dict(label=r.label, count=r.count, percentage=r.percentage) for r in rise]
+    fall_result = [dict(label=r.label, count=r.count, percentage=r.percentage) for r in fall]
+    session.close()
+    return {"rise": rise_result, "fall": fall_result, "date": latest[0]}
+
+@app.get("/api/unified_market_analysis")
+def get_unified_market_analysis():
+    session = SessionLocal()
+    latest = session.query(UnifiedMarketAnalysis.date).order_by(UnifiedMarketAnalysis.date.desc()).first()
+    if not latest:
+        session.close()
+        return {"data": None, "date": None}
+    record = session.query(UnifiedMarketAnalysis).filter_by(date=latest[0]).first()
+    session.close()
+    if not record:
+        return {"data": None, "date": latest[0]}
+    return {
+        "today_stats": json.loads(record.today_stats),
+        "rise_distribution": json.loads(record.rise_distribution),
+        "fall_distribution": json.loads(record.fall_distribution),
+        "recent_stats": json.loads(record.recent_stats),
+        "avg_stats": json.loads(record.avg_stats),
+        "date": record.date
+    }
+
+@app.post("/api/refresh_market_stats")
+def refresh_market_stats(background_tasks: BackgroundTasks):
+    background_tasks.add_task(save_market_stats)
+    return {"msg": "市场统计分析已刷新（后台执行）"}
+
+@app.post("/api/refresh_high_rise_stocks")
+def refresh_high_rise_stocks(background_tasks: BackgroundTasks):
+    background_tasks.add_task(save_high_rise_stocks)
+    return {"msg": "高涨幅创新高分析已刷新（后台执行）"}
+
+@app.post("/api/refresh_rise_fall_distribution")
+def refresh_rise_fall_distribution(background_tasks: BackgroundTasks):
+    background_tasks.add_task(save_rise_fall_distribution)
+    return {"msg": "涨跌分布分析已刷新（后台执行）"}
+
+@app.post("/api/refresh_unified_market_analysis")
+def refresh_unified_market_analysis(background_tasks: BackgroundTasks):
+    background_tasks.add_task(save_unified_market_analysis)
+    return {"msg": "综合分析已刷新（后台执行）"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -2,6 +2,9 @@
   <div class="high-rise-stocks">
     <div class="header">
       <h2>📈 高涨幅创新高股票</h2>
+      <button @click="refreshAnalysis" :disabled="refreshing || loading" class="refresh-btn" style="margin-left: 10px; background: #28a745;">
+        {{ refreshing ? '分析中...' : '刷新分析' }}
+      </button>
       <div class="stats" v-if="stats">
         <span class="stat-item">
           <span class="label">总数量:</span>
@@ -90,7 +93,7 @@
 
 <script>
 import { ref, computed, onMounted } from 'vue'
-import { getHighRiseStocks } from '../api'
+import { getHighRiseStocks, refreshHighRiseStocks } from '../api'
 
 export default {
   name: 'HighRiseStocks',
@@ -101,6 +104,7 @@ export default {
     const showThreeYearHighs = ref(false)
     const showAllTimeHighs = ref(false)
     const tradeDate = ref(null)
+    const refreshing = ref(false)
 
     const stats = computed(() => {
       if (stocks.value.length === 0) return null
@@ -144,6 +148,18 @@ export default {
       }
     }
 
+    const refreshAnalysis = async () => {
+      refreshing.value = true
+      try {
+        await refreshHighRiseStocks()
+        await loadData()
+      } catch (err) {
+        error.value = err.response?.data?.detail || '刷新分析失败'
+      } finally {
+        refreshing.value = false
+      }
+    }
+
     onMounted(() => {
       loadData()
     })
@@ -157,7 +173,9 @@ export default {
       showAllTimeHighs,
       filteredStocks,
       loadData,
-      tradeDate
+      tradeDate,
+      refreshing,
+      refreshAnalysis
     }
   }
 }
@@ -199,7 +217,7 @@ export default {
 
 .stat-item .label {
   font-size: 14px;
-  color: #6c757d;
+  color: #626e78;
   margin-bottom: 5px;
 }
 

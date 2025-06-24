@@ -37,8 +37,7 @@
       <div class="stock-card" :class="{ 'is-highest': stockData.is_highest }">
         <div class="stock-header">
           <div class="stock-info">
-            <h3>{{ stockData.name }}</h3>
-            <span class="code">{{ stockData.ts_code }}</span>
+            <h3>{{ stockData.name || '未知' }} <span class="code">{{ stockData.ts_code }}</span></h3>
           </div>
           <div class="status-badge" :class="{ 'highest': stockData.is_highest }">
             {{ stockData.is_highest ? '🏆 今日最高' : '📊 非今日最高' }}

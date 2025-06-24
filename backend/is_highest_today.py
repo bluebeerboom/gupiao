@@ -35,29 +35,78 @@ def is_today_highest(stock_code: str):
         df = pro.us_daily(ts_code=stock_code, start_date=start_date_str, end_date=end_date_str)
         market = '美股'
     else:
-        print(f"无法识别股票代码后缀，请输入标准股票代码，如 000001.SZ、01810.HK、AAPL.US")
-        return
+        return {"error": "无法识别股票代码后缀，请输入标准股票代码，如 000001.SZ、01810.HK、AAPL.US"}
 
     if df is None or df.empty:
-        print(f"未获取到股票 {stock_code} 的历史数据！请检查代码、权限或Tushare接口权限。")
-        return
+        return {"error": f"未获取到股票 {stock_code} 的历史数据"}
 
     # 按交易日期排序（最新在前）
     df = df.sort_values('trade_date', ascending=False)
     today_close = df.iloc[0]['close']
     max_close = df['close'].max()
+    min_close = df['close'].min()
     today_date = df.iloc[0]['trade_date']
+    pct_chg = float(df.iloc[0]['pct_chg']) if 'pct_chg' in df.iloc[0] else 0.0
+    vol = float(df.iloc[0]['vol']) if 'vol' in df.iloc[0] else 0.0
+    amount = float(df.iloc[0]['amount']) if 'amount' in df.iloc[0] else 0.0
 
-    # 绘制价格曲线
-    plot_price_curve(df, stock_code, market, today_close, max_close, today_date)
-    print(df.head(10))
+    # 获取股票名称
+    stock_name = None
+    try:
+        stock_info = pro.stock_basic(ts_code=stock_code)
+        if not stock_info.empty:
+            stock_name = stock_info.iloc[0]['name']
+    except Exception as e:
+        stock_name = None
 
-    if today_close >= max_close:
+    # 准备历史数据用于前端折线图
+    df_sorted = df.sort_values('trade_date')
+    history = []
+    for _, row in df_sorted.iterrows():
+        history.append({
+            "date": str(row['trade_date']),
+            "close": float(row['close']),
+            "high": float(row['high']),
+            "low": float(row['low']),
+            "pct_chg": float(row['pct_chg']) if 'pct_chg' in row else 0.0,
+            "vol": float(row['vol']) if 'vol' in row else 0.0
+        })
+
+    # 计算数据期间和天数
+    if not df_sorted.empty:
+        start_date = str(df_sorted.iloc[0]['trade_date'])
+        end_date = str(df_sorted.iloc[-1]['trade_date'])
+        data_period = f"{start_date} 至 {end_date}"
+        total_days = len(df_sorted)
+    else:
+        data_period = ""
+        total_days = 0
+
+    is_highest = today_close >= max_close
+
+    result = {
+        "ts_code": stock_code,
+        "name": stock_name,
+        "market": market,
+        "today_close": float(today_close),
+        "max_close": float(max_close),
+        "min_close": float(min_close),
+        "is_highest": bool(is_highest),
+        "trade_date": str(today_date),
+        "pct_chg": pct_chg,
+        "vol": vol,
+        "amount": amount,
+        "history": history,
+        "data_period": data_period,
+        "total_days": total_days
+    }
+
+    if is_highest:
         print(f"{stock_code}（{market}）在 {today_date} 的收盘价 {today_close} 是近{MAX_YEARS}年内最高价！")
-        return True
     else:
         print(f"{stock_code}（{market}）在 {today_date} 的收盘价 {today_close} 不是近{MAX_YEARS}年内最高价，最高为 {max_close}")
-        return False
+
+    return result
 
 
 def plot_price_curve(df, stock_code, market, today_close, max_close, today_date):

@@ -5,6 +5,15 @@
       <button @click="loadData" :disabled="loading" class="refresh-btn">
         {{ loading ? '加载中...' : '刷新数据' }}
       </button>
+      <button @click="refreshAnalysis" :disabled="refreshing || loading" class="refresh-btn" style="margin-left: 10px; background: #28a745;">
+        {{ refreshing ? '分析中...' : '刷新分析' }}
+      </button>
+      <button @click="refreshRiseFall" :disabled="refreshingRiseFall || loading" class="refresh-btn" style="margin-left: 10px; background: #ff9800;">
+        {{ refreshingRiseFall ? '分析中...' : '刷新涨跌分布' }}
+      </button>
+      <button @click="refreshUnified" :disabled="refreshingUnified || loading" class="refresh-btn" style="margin-left: 10px; background: #9c27b0;">
+        {{ refreshingUnified ? '分析中...' : '刷新综合分析' }}
+      </button>
     </div>
 
     <div v-if="loading" class="loading">
@@ -113,7 +122,7 @@
 
 <script>
 import { ref, onMounted } from 'vue'
-import { getMarketAnalysis } from '../api'
+import { getMarketAnalysis, refreshMarketStats, refreshRiseFallDistribution, refreshUnifiedMarketAnalysis } from '../api'
 
 export default {
   name: 'MarketStats',
@@ -121,6 +130,9 @@ export default {
     const marketData = ref(null)
     const loading = ref(false)
     const error = ref(null)
+    const refreshing = ref(false)
+    const refreshingRiseFall = ref(false)
+    const refreshingUnified = ref(false)
 
     const loadData = async () => {
       loading.value = true
@@ -143,6 +155,42 @@ export default {
       }
     }
 
+    const refreshAnalysis = async () => {
+      refreshing.value = true
+      try {
+        await refreshMarketStats()
+        await loadData()
+      } catch (err) {
+        error.value = err.response?.data?.detail || '刷新分析失败'
+      } finally {
+        refreshing.value = false
+      }
+    }
+
+    const refreshRiseFall = async () => {
+      refreshingRiseFall.value = true
+      try {
+        await refreshRiseFallDistribution()
+        await loadData()
+      } catch (err) {
+        error.value = err.response?.data?.detail || '刷新涨跌分布失败'
+      } finally {
+        refreshingRiseFall.value = false
+      }
+    }
+
+    const refreshUnified = async () => {
+      refreshingUnified.value = true
+      try {
+        await refreshUnifiedMarketAnalysis()
+        await loadData()
+      } catch (err) {
+        error.value = err.response?.data?.detail || '刷新综合分析失败'
+      } finally {
+        refreshingUnified.value = false
+      }
+    }
+
     onMounted(() => {
       loadData()
     })
@@ -151,7 +199,13 @@ export default {
       marketData,
       loading,
       error,
-      loadData
+      loadData,
+      refreshing,
+      refreshAnalysis,
+      refreshingRiseFall,
+      refreshRiseFall,
+      refreshingUnified,
+      refreshUnified
     }
   }
 }

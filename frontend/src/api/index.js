@@ -43,9 +43,9 @@ export const stockAPI = {
     return response.data
   },
   
-  // 获取市场统计
+  // 获取市场统计（查数据库）
   async getMarketStats() {
-    const response = await api.get('/market-stats')
+    const response = await api.get('/market_stats')
     return response.data
   },
   
@@ -56,10 +56,10 @@ export const stockAPI = {
   }
 }
 
-// 获取高涨幅创新高股票
+// 获取高涨幅创新高股票（查数据库）
 export const getHighRiseStocks = async () => {
   try {
-    const response = await api.get('/high-rise-stocks')
+    const response = await api.get('/high_rise_stocks')
     return response.data
   } catch (error) {
     console.error('获取高涨幅股票失败:', error)
@@ -78,10 +78,10 @@ export const checkIsHighestToday = async (tsCode) => {
   }
 }
 
-// 获取市场分析数据
+// 获取市场分析数据（查数据库）
 export const getMarketAnalysis = async () => {
   try {
-    const response = await api.get('/market-analysis')
+    const response = await api.get('/unified_market_analysis')
     return response.data
   } catch (error) {
     console.error('获取市场分析失败:', error)
@@ -89,13 +89,57 @@ export const getMarketAnalysis = async () => {
   }
 }
 
-// 获取简化的市场统计数据（快速版本）
-export const getMarketStatsSimple = async () => {
+// 获取涨跌分布分析（查数据库）
+export const getRiseFallDistribution = async () => {
   try {
-    const response = await api.get('/market-stats-simple')
+    const response = await api.get('/rise_fall_distribution')
     return response.data
   } catch (error) {
-    console.error('获取简化市场统计失败:', error)
+    console.error('获取涨跌分布失败:', error)
+    throw error
+  }
+}
+
+// 手动触发市场统计分析
+export const refreshMarketStats = async () => {
+  try {
+    const response = await api.post('/refresh_market_stats')
+    return response.data
+  } catch (error) {
+    console.error('刷新市场统计失败:', error)
+    throw error
+  }
+}
+
+// 手动触发高涨幅创新高分析
+export const refreshHighRiseStocks = async () => {
+  try {
+    const response = await api.post('/refresh_high_rise_stocks')
+    return response.data
+  } catch (error) {
+    console.error('刷新高涨幅分析失败:', error)
+    throw error
+  }
+}
+
+// 手动触发涨跌分布分析
+export const refreshRiseFallDistribution = async () => {
+  try {
+    const response = await api.post('/refresh_rise_fall_distribution')
+    return response.data
+  } catch (error) {
+    console.error('刷新涨跌分布分析失败:', error)
+    throw error
+  }
+}
+
+// 手动触发综合分析
+export const refreshUnifiedMarketAnalysis = async () => {
+  try {
+    const response = await api.post('/refresh_unified_market_analysis')
+    return response.data
+  } catch (error) {
+    console.error('刷新综合分析失败:', error)
     throw error
   }
 }
